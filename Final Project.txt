@@ -1,0 +1,189 @@
+vim inventory1
+=========================
+[webservers]
+server[a:c].lab.example.com
+
+[servers]
+servera.lab.example.com
+serverb.lab.example.com
+
+[testing]
+serverc.lab.example.com
+
+================================
+ansible-navigator inventory -i inventory1
+ansible-navigator inventory -i inventory1 -m stdout --graph servers
+ansible-navigator inventory -i inventory1 -m stdout --list
+ansible-navigator inventory -i inventory1 
+=================================
+=================================
+vim ansible.cfg
+
+[defaults]
+inventory = ./inventory1
+===============================
+===============================
+vim finalexam.yml
+
+---
+- name: Define common packages
+  hosts: testing
+  become: true
+  gather_facts: false
+  vars:
+    common_packages:	# Defining the packages in variable name.
+      - httpd
+      - mariadb-server
+      - firewalld
+
+  # 1. Package Installation and Configuration:
+  # Testing the packages on serverc before installing them on target servers.
+ 
+  tasks:
+    - name: Test packages on serverc
+      ansible.builtin.dnf:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ common_packages }}"
+
+    - name: Remove test packages from serverc
+      ansible.builtin.dnf:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ common_packages }}"
+      # when: item in ['httpd', 'mariadb']   # only check real services 
+
+# Play 2: Install and configure packages on servera and serverb
+- name: Install and configure packages on servera and serverb
+  hosts: servers
+  become: true
+  gather_facts: true
+
+# 4. Ensuring that usernames, group names, and package names are configurable using Ansible variables
+  vars:
+    common_packages:
+    - name: httpd
+      service: httpd
+    - name: mariadb-server
+      service: mariadb
+    - name: firewalld
+      service: firewalld
+
+    admin_groups:
+      - jr_admins
+      - sr_admins
+
+    admin_users:
+      - { name: "Anam", group: "jr_admins" }
+      - { name: "Saad", group: "sr_admins" }
+
+  tasks:
+  # Installing and configuring tested packages on Servera and Serverb
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name: "{{ item.name }}"
+        state: present
+      loop: "{{ common_packages }}"
+      when: ansible_facts['os_family'] == "RedHat"     
+      ignore_errors: yes   # Continue even if installation fails
+      register: pkg_install
+     
+# 5. Error Handling for package installations.
+    - name: Show package installation status
+      ansible.builtin.debug:
+        #msg: "Package {{ item.item.name }} installation result: {{ 'SUCCESS' if item.rc == 0 else 'FAILED' }}"
+        msg: "Service {{ item.item.service }} start status: {{ 'SUCCESS' if not item.failed else 'FAILED' }}"
+      loop: "{{ pkg_install.results }}"
+
+  # Ensuring services are enabled + running.
+    - name: Start and enable services for installed packages
+      ansible.builtin.service:
+        name: "{{ item.service }}"
+        state: started
+        enabled: true
+      loop: "{{ common_packages }}"
+      # when: item in ['httpd', 'mariadb']   # only check real services 
+      register: service_start
+
+# 5. Error Handling for staring the services.
+    - name: Show service start results
+      ansible.builtin.debug:
+        #msg: "Service {{ item.item.service }} start status: {{ 'SUCCESS' if item.rc == 0 else 'FAILED' }}"
+        msg: "Service {{ item.item.service }} start status: {{ 'SUCCESS' if not item.failed else 'FAILED' }}"
+      loop: "{{ service_start.results }}"
+
+  # 2. Service Management:
+  # Verifying services are actually active after installation.
+    - name: Verify services are running
+      ansible.builtin.command: "systemctl is-active {{ item.service }}"
+      register: service_status
+      changed_when: false
+    # failed_when: service_status.rc != 0	# prevents hard failure if service doesn't exist
+      failed_when: service_status.stdout != "active"  
+      loop: "{{ common_packages }}"
+      #loop_control:
+           # label: "{{ item.name }}"
+      
+    - name: Show service status
+    # ansible.builtin.debug:
+      debug:
+        msg: "{{ item.item }} service is {{ item.stdout }}"
+      loop: "{{ service_status.results }}"
+   
+  # 3. User Management:
+  # Ensure admin groups exist on both servers
+    - name: Ensure admin groups exist
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ admin_groups }}"
+
+  # Add admin users and assign them to groups on both servers
+    - name: Add admin users and assign them to groups
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        group: "{{ item.group }}"
+        state: present
+        shell: /bin/bash
+      loop: "{{ admin_users }}"
+
+
+===================================================
+ansible-navigator run -m stdout finalexam.yml --syntax-check
+ansible-navigator run -m stdout finalexam.yml 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
